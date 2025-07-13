@@ -27,7 +27,7 @@ Thumbs.db
 
 # Test artifacts
 *.pdf
-*.txt
+
 *.png
 *.jpg
 *.jpeg
