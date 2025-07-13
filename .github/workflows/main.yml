@@ -1,15 +1,16 @@
+
 name: CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch: # Allows manual triggering
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write # Grant write permissions for creating releases and tags
-  pull-requests: write # Needed for some release actions, good practice
+  contents: write
+  pull-requests: write
 
 jobs:
   test:
@@ -18,154 +19,164 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-    - uses: actions/checkout@v4
-    - name: Echo Test Job Start
-      run: echo "Starting Test Job on ${{ matrix.os }}"
-    - name: List files in working directory (Test Job)
-      run: ls -la
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install PyInstaller setuptools wheel
-    - name: Run tests
-      run: python -m unittest discover tests
+      - uses: actions/checkout@v4
+
+      - name: Echo Test Job Start
+        run: echo "Starting Test Job on ${{ matrix.os }}"
+
+      - name: List files in working directory (Test Job)
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            dir
+          else
+            ls -la
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller setuptools wheel
+
+      - name: Run tests
+        run: python -m unittest discover tests
 
   build:
     needs: test
     runs-on: ${{ matrix.os }}
-    if: ${{ always() }} # Run even if 'test' job fails
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-    - uses: actions/checkout@v4
-    - name: Echo Build Job Start
-      run: echo "Starting Build Job on ${{ matrix.os }}"
-    - name: List files in working directory (Build Job)
-      run: ls -la
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install PyInstaller setuptools wheel
-    - name: Build executable
-      run: pyinstaller --onefile --name pdfcli pdfcli/main.py
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: pdfcli-${{ matrix.os }}
-        path: dist/pdfcli*
+      - uses: actions/checkout@v4
+
+      - name: Echo Build Job Start
+        run: echo "Starting Build Job on ${{ matrix.os }}"
+
+      - name: List files in working directory (Build Job)
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            dir
+          else
+            ls -la
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller setuptools wheel
+
+      - name: Build executable
+        run: pyinstaller --onefile --name pdfcli pdfcli/main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfcli-${{ matrix.os }}
+          path: |
+            dist/pdfcli*
+            dist/pdfcli*.exe
 
   create_tag:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0 # Fetch all history for tag creation
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-    - name: Get version from setup.py
-      id: get_version
-      run: |
-        VERSION=$(python -c "
-import setuptools
-import os
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-version = None
-with open('setup.py', 'r') as f:
-    for line in f:
-        if 'version=' in line:
-            version = line.split('version=')[1].strip().strip("\',\").strip('"')
-            break
-if version:
-    print(f\"VERSION={version}\")
-else:
-    print(\"Error: Version not found in setup.py\")
-    exit(1)
-        ")
-        echo "Extracted Version: $VERSION"
-        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-    - name: Check if tag already exists
-      id: check_tag
-      run: |
-        TAG_NAME="v${{ steps.get_version.outputs.VERSION }}"
-        if git rev-parse $TAG_NAME >/dev/null 2>&1; then
-          echo "Tag $TAG_NAME already exists. Skipping tag creation."
-          echo "tag_exists=true" >> $GITHUB_OUTPUT
-        else:
-          echo "Tag $TAG_NAME does not exist. Proceeding with tag creation."
-          echo "tag_exists=false" >> $GITHUB_OUTPUT
-        fi
-    - name: Create and push tag
-      if: steps.check_tag.outputs.tag_exists == 'false'
-      run: |
-        TAG_NAME="v${{ steps.get_version.outputs.VERSION }}"
-        echo "Attempting to create and push tag: $TAG_NAME"
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag $TAG_NAME
-        git push origin $TAG_NAME
-        echo "Tag $TAG_NAME pushed successfully."
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Ensure token is available for pushing tags
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Get version from setup.py
+        id: get_version
+        run: |
+          VERSION=$(python -c "import setuptools; import re; f = open('setup.py').read(); match = re.search(r'version\s*=\s*[\"\\\']([^\"\\\']+)[\"\\\']', f); print(match.group(1) if match else '0.0.0')")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          TAG_NAME="v${{ steps.get_version.outputs.version }}"
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.tag_exists == 'false'
+        run: |
+          TAG_NAME="v${{ steps.get_version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
 
   release:
-    needs: create_tag # Ensure this job runs after create_tag
+    needs: create_tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && success() # Only release if build succeeded AND a tag was pushed
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && success()
     steps:
-    - uses: actions/checkout@v4
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
-    - name: Upload Release Asset (Windows)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/pdfcli-windows-latest/pdfcli.exe
-        asset_name: pdfcli-windows.exe
-        asset_content_type: application/octet-stream
-    - name: Upload Release Asset (Linux)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/pdfcli-ubuntu-latest/pdfcli
-        asset_name: pdfcli-linux
-        asset_content_type: application/octet-stream
-    - name: Upload Release Asset (macOS)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/pdfcli-macos-latest/pdfcli
-        asset_name: pdfcli-macos
-        asset_content_type: application/octet-stream
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset (Windows)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/pdfcli-windows-latest/pdfcli.exe
+          asset_name: pdfcli-windows.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload Release Asset (Linux)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/pdfcli-ubuntu-latest/pdfcli
+          asset_name: pdfcli-linux
+          asset_content_type: application/octet-stream
+
+      - name: Upload Release Asset (macOS)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/pdfcli-macos-latest/pdfcli
+          asset_name: pdfcli-macos
+          asset_content_type: application/octet-stream
