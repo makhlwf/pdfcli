@@ -17,6 +17,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Echo Test Job Start
       run: echo "Starting Test Job on ${{ matrix.os }}"
+    - name: List files in working directory (Test Job)
+      run: ls -la
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -40,6 +42,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Echo Build Job Start
       run: echo "Starting Build Job on ${{ matrix.os }}"
+    - name: List files in working directory (Build Job)
+      run: ls -la
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -57,8 +61,46 @@ jobs:
         name: pdfcli-${{ matrix.os }}
         path: dist/pdfcli*
 
-  release:
+  create_tag:
     needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - name: Get version from setup.py
+      id: get_version
+      run: |
+        VERSION=$(python -c "
+import setuptools
+import os
+
+version = None
+with open('setup.py', 'r') as f:
+    for line in f:
+        if 'version=' in line:
+            version = line.split('version=')[1].strip().strip("\',\").strip('"')
+            break
+if version:
+    print(f\"VERSION={version}\")
+else:
+    print(\"Error: Version not found in setup.py\")
+    exit(1)
+        ")
+        echo "$VERSION" >> $GITHUB_OUTPUT
+    - name: Create tag
+      run: |
+        TAG_NAME="v${{ steps.get_version.outputs.VERSION }}"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag $TAG_NAME
+        git push origin $TAG_NAME
+
+  release:
+    needs: create_tag
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && success() # Only release if build succeeded
     steps:
